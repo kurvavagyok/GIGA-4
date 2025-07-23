@@ -42,3 +42,27 @@ pytest
 
 ## License
 MIT
+
+## API Usage
+
+- **Healthcheck**
+  ```bash
+  curl http://localhost:8080/health
+  # {"status": "ok"}
+  ```
+- **Root API**
+  ```bash
+  curl http://localhost:8080/api
+  ```
+- **Simple Alpha Service**
+  ```bash
+  curl -X POST http://localhost:8080/api/alpha/simple/test \
+    -H 'Content-Type: application/json' \
+    -d '{"service_name": "test", "query": "hello", "details": ""}'
+  ```
+
+## Troubleshooting
+- Ensure all environment variables are set in `.env`.
+- Check logs for errors: `docker logs <container>` or server output.
+- For CORS issues, update allowed origins in `main.py`.
+- For dependency issues, rebuild the Docker image.

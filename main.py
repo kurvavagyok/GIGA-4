@@ -28,7 +28,10 @@ from exa_py import Exa
 from fastapi import FastAPI, HTTPException, status, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 from pydantic import BaseModel, Field
 
 # Naplózás konfigurálása
@@ -119,13 +122,20 @@ app = FastAPI(
     openapi_url="/api/openapi.json"
 )
 
+# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost", "http://localhost:3000", "https://your-production-domain.com"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- Security Headers ---
+app.add_middleware(SecurityHeadersMiddleware)
+
+# --- HTTPS Redirect (optional, for production) ---
+# app.add_middleware(HTTPSRedirectMiddleware)
 
 app.mount("/static", StaticFiles(directory="templates"), name="static")
 
@@ -1764,6 +1774,32 @@ async def clear_cache():
     """Cache manuális törlése"""
     response_cache.clear()
     return {"message": "Cache törölve", "status": "success"}
+
+# --- Security Headers Middleware ---
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        response.headers['X-Frame-Options'] = 'DENY'
+        response.headers['X-XSS-Protection'] = '1; mode=block'
+        response.headers['Strict-Transport-Security'] = 'max-age=63072000; includeSubDomains; preload'
+        response.headers['Referrer-Policy'] = 'no-referrer'
+        response.headers['Permissions-Policy'] = 'geolocation=(), microphone=()'
+        return response
+
+# --- Healthcheck Endpoint ---
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+# --- Global Exception Handler ---
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    logger.error(f"Unhandled error: {exc}", exc_info=True)
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error"}
+    )
 
 if __name__ == '__main__':
     import uvicorn
