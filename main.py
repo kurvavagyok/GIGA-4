@@ -9,6 +9,8 @@ import hashlib
 import base64
 from functools import lru_cache
 import time
+import sentry_sdk
+from prometheus_fastapi_instrumentator import Instrumentator
 
 # Google Cloud kliensekhez
 from google.cloud import aiplatform
@@ -1800,6 +1802,25 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content={"detail": "Internal server error"}
     )
+
+# --- Sentry Integration ---
+SENTRY_DSN = os.environ.get("SENTRY_DSN")
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=0.1,
+        environment=os.environ.get("ENVIRONMENT", "production"),
+    )
+
+# --- Prometheus Metrics ---
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
+
+@app.get("/ready")
+async def ready():
+    required_keys = [GCP_SERVICE_ACCOUNT_KEY_JSON, GCP_PROJECT_ID, GCP_REGION, CEREBRAS_API_KEY, GEMINI_API_KEY, EXA_API_KEY, OPENAI_API_KEY]
+    if all(required_keys):
+        return {"status": "ready"}
+    return JSONResponse(status_code=503, content={"status": "not ready", "missing": [k for k, v in zip(["GCP_SERVICE_ACCOUNT_KEY_JSON", "GCP_PROJECT_ID", "GCP_REGION", "CEREBRAS_API_KEY", "GEMINI_API_KEY", "EXA_API_KEY", "OPENAI_API_KEY"], required_keys) if not v]})
 
 if __name__ == '__main__':
     import uvicorn
