@@ -66,3 +66,17 @@ MIT
 - Check logs for errors: `docker logs <container>` or server output.
 - For CORS issues, update allowed origins in `main.py`.
 - For dependency issues, rebuild the Docker image.
+
+## Blue/Green Deployment (Kubernetes)
+- Deploy a new version alongside the old one (e.g., `fastapi-ai-backend-green`).
+- Switch the service selector to the new deployment after health checks pass.
+- Optionally, use Ingress rules for canary traffic splitting.
+
+## Centralized Logging
+- Logs are in JSON format for easy ingestion by ELK, Loki, or cloud logging.
+- Mount `/app/logs` as a persistent volume (see `k8s-deployment.yaml`).
+- Forward logs to your logging backend (e.g., Filebeat, Fluentd, or cloud agent).
+
+## Persistent Storage
+- Use the provided PVC in `k8s-deployment.yaml` for logs or results.
+- Adjust storage size and mount path as needed for your workload.

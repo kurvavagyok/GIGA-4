@@ -35,10 +35,36 @@ from fastapi.middleware.httpsredirect import HTTPSRedirectMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import ASGIApp, Receive, Scope, Send
 from pydantic import BaseModel, Field
+from fastapi import BackgroundTasks
+import json as pyjson
 
 # Naplózás konfigurálása
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Switch logging to JSON format
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            'timestamp': self.formatTime(record, self.datefmt),
+            'level': record.levelname,
+            'message': record.getMessage(),
+            'name': record.name,
+        }
+        if record.exc_info:
+            log_record['exc_info'] = self.formatException(record.exc_info)
+        return pyjson.dumps(log_record)
+
+for handler in logging.getLogger().handlers:
+    handler.setFormatter(JsonFormatter())
+
+# ... existing code ...
+log_dir = "/app/logs"
+os.makedirs(log_dir, exist_ok=True)
+file_handler = logging.FileHandler(f"{log_dir}/app.log")
+file_handler.setFormatter(JsonFormatter())
+logging.getLogger().addHandler(file_handler)
+# ... existing code ...
 
 # --- Digitális Ujjlenyomat ---
 DIGITAL_FINGERPRINT = "Jade made by Kollár Sándor"
@@ -1908,6 +1934,13 @@ async def execute_simple_alpha_service(service_name: str, request: SimpleAlphaRe
         query=request.query,
         details=request.details
     )
+
+@app.post("/background-task")
+async def run_background_task(background_tasks: BackgroundTasks):
+    def log_task():
+        logger.info("Background task executed!")
+    background_tasks.add_task(log_task)
+    return {"message": "Task scheduled"}
 
 if __name__ == '__main__':
     import uvicorn

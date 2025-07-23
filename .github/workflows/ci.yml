@@ -27,3 +27,11 @@ jobs:
         run: pytest
       - name: Build Docker image
         run: docker build -t fastapi-ai-backend .
+      - name: Security scan with safety
+        run: |
+          pip install safety
+          safety check -r requirements.txt || true
+      - name: Security scan with pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit || true
