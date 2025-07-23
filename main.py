@@ -1822,6 +1822,93 @@ async def ready():
         return {"status": "ready"}
     return JSONResponse(status_code=503, content={"status": "not ready", "missing": [k for k, v in zip(["GCP_SERVICE_ACCOUNT_KEY_JSON", "GCP_PROJECT_ID", "GCP_REGION", "CEREBRAS_API_KEY", "GEMINI_API_KEY", "EXA_API_KEY", "OPENAI_API_KEY"], required_keys) if not v]})
 
+# --- Auth & Security Config ---
+JWT_SECRET_KEY = os.environ.get("JWT_SECRET_KEY", "supersecretkey")
+JWT_ALGORITHM = "HS256"
+API_KEYS = set([k.strip() for k in os.environ.get("API_KEYS", "changeme1,changeme2").split(",")])
+
+# --- Password Hashing Context (for demo, single user) ---
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+FAKE_USER = {"username": "admin", "hashed_password": pwd_context.hash("adminpass")}
+
+# --- OAuth2 ---
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
+
+def verify_password(plain, hashed):
+    return pwd_context.verify(plain, hashed)
+
+def authenticate_user(username, password):
+    if username == FAKE_USER["username"] and verify_password(password, FAKE_USER["hashed_password"]):
+        return {"username": username}
+    return None
+
+def create_access_token(data: dict, expires_delta: int = 3600):
+    to_encode = data.copy()
+    to_encode["exp"] = int(time.time()) + expires_delta
+    return jwt.encode(to_encode, JWT_SECRET_KEY, algorithm=JWT_ALGORITHM)
+
+async def get_current_user(token: str = Depends(oauth2_scheme)):
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, JWT_SECRET_KEY, algorithms=[JWT_ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        return {"username": username}
+    except JWTError:
+        raise credentials_exception
+
+# --- API Key Dependency ---
+from fastapi import Header
+async def api_key_auth(x_api_key: str = Header(...)):
+    if x_api_key not in API_KEYS:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid API Key")
+
+# --- Rate Limiting Middleware (simple, per-IP) ---
+RATE_LIMIT = 30  # requests
+RATE_PERIOD = 60  # seconds
+rate_limit_cache = defaultdict(list)
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        ip = request.client.host
+        now = time.time()
+        window = [t for t in rate_limit_cache[ip] if now - t < RATE_PERIOD]
+        window.append(now)
+        rate_limit_cache[ip] = window
+        if len(window) > RATE_LIMIT:
+            return JSONResponse(status_code=status.HTTP_429_TOO_MANY_REQUESTS, content={"detail": "Rate limit exceeded"})
+        return await call_next(request)
+
+app.add_middleware(RateLimitMiddleware)
+
+# --- Token endpoint ---
+from fastapi import Form
+@app.post("/token")
+async def login(form_data: OAuth2PasswordRequestForm = Depends()):
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Incorrect username or password")
+    access_token = create_access_token({"sub": user["username"]})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+# Protect /api/alpha/simple/{service_name} with JWT and API key
+def jwt_and_api_key(user=Depends(get_current_user), api_key=Depends(api_key_auth)):
+    return True
+
+@app.post("/api/alpha/simple/{service_name}")
+async def execute_simple_alpha_service(service_name: str, request: SimpleAlphaRequest, auth=Depends(jwt_and_api_key)):
+    """Egyszerű Alpha szolgáltatás végrehajtása szöveges bemenetnél"""
+    return await handle_simple_alpha_service(
+        service_name=service_name,
+        query=request.query,
+        details=request.details
+    )
+
 if __name__ == '__main__':
     import uvicorn
     uvicorn.run(
